@@ -1,0 +1,21 @@
+package com.mini_merchant.pay.ping.controller;
+
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import com.mini_merchant.pay.ping.dto.PingResponse;
+import com.mini_merchant.pay.ping.service.PingService;
+
+import lombok.RequiredArgsConstructor;
+
+@RestController
+@RequiredArgsConstructor
+public class PingController {
+
+    private final PingService pingService;
+
+    @GetMapping("/ping")
+    public PingResponse ping() {
+        return pingService.ping();
+    }
+}
