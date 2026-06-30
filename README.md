@@ -1,6 +1,6 @@
 # Mini Merchant Server
 
-A lightweight payment integration service built with Spring Boot that connects merchants to Vietnamese payment gateways (MoMo, VNPay). Designed to handle high-concurrency payment flows with Redis-backed idempotency and PostgreSQL for transaction persistence.
+A lightweight payment integration service built with Spring Boot that connects merchants to Vietnamese payment gateways (MoMo, VNPay). Designed to handle high-concurrency payment flows with Redis-backed idempotency and PostgreSQL for transaction persistence!
 
 ---
 
