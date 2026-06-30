@@ -32,6 +32,16 @@ services:
     networks:
       - merchant-network
 
+  adminer:
+    image: adminer:latest
+    container_name: mini_merchant_adminer
+    ports:
+      - "8081:8080"
+    depends_on:
+      - postgres
+    networks:                # ← thêm 2 dòng này
+      - merchant-network
+
 volumes:
   postgres_data:
   redis_data:
