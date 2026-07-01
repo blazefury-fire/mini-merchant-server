@@ -1,4 +1,4 @@
-package com.mini_merchant.pay.ping.dto;
+package com.mini_merchant.pay.domain.ping.dto;
 
 public record PingResponse(String message) {
 }
