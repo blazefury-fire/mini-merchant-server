@@ -1,0 +1,20 @@
+#!/bin/sh
+
+echo "🔍 Running lint (compile check)..."
+./mvnw compile -q
+if [ $? -ne 0 ]; then
+  echo "❌ Lint failed. Commit blocked."
+  exit 1
+fi
+echo "✅ Lint passed."
+
+echo "🧪 Running unit tests..."
+./mvnw test -q
+if [ $? -ne 0 ]; then
+  echo "❌ Unit tests failed. Commit blocked."
+  exit 1
+fi
+echo "✅ Unit tests passed."
+
+echo "🎉 All checks passed. Proceeding with commit."
+exit 0
