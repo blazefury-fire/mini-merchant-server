@@ -1,53 +1,68 @@
 # Mini Merchant Server
 
-A lightweight payment integration service built with Spring Boot that connects merchants to Vietnamese payment gateways (MoMo, VNPay). Designed to handle high-concurrency payment flows with Redis-backed idempotency and PostgreSQL for transaction persistence!
+A Spring Boot payment/merchant backend (`groupId: com.mini-merchant`, `artifactId: pay`). It exposes a REST API for managing merchants and — as a roadmap — connecting them to Vietnamese payment gateways (MoMo, VNPay). PostgreSQL is the single source of truth for persistence; Redis is available for caching and, later, idempotency/locking.
 
----
-
-## What This Project Does
-
-- Exposes a REST API for initiating and verifying payments via **MoMo** and **VNPay**
-- Handles **payment callbacks/webhooks** from the gateways and updates order status atomically
-- Uses **Redis** to deduplicate concurrent payment requests (idempotency keys) and cache session/token state
-- Uses **PostgreSQL** to persist orders, transactions, and audit logs
-- Built for **high-concurrency** scenarios: Redis locks prevent double-processing of the same payment event; the stateless REST layer scales horizontally behind a load balancer
+> **Status:** Early stage. A full merchant CRUD domain and a `/ping` health check exist today. Payment/order/callback domains are planned (see [Roadmap](#roadmap)).
 
 ---
 
 ## Tech Stack
 
-| Layer        | Technology                    |
-|--------------|-------------------------------|
-| Runtime      | Java 21                       |
-| Framework    | Spring Boot 3.5               |
-| Persistence  | PostgreSQL 16 + Spring Data JPA |
-| Cache / Lock | Redis 7 + Spring Data Redis   |
-| Build        | Maven (mvnw wrapper)          |
-| Containers   | Docker Compose                |
+| Layer         | Technology                                    |
+|---------------|-----------------------------------------------|
+| Runtime       | Java 21                                        |
+| Framework     | Spring Boot 3.5.16                             |
+| Persistence   | PostgreSQL 16 + Spring Data JPA / Hibernate    |
+| Migrations    | Flyway (SQL, the **only** thing that alters schema) |
+| Cache         | Redis 7 + Spring Data Redis                    |
+| Validation    | Spring Bean Validation (`jakarta.validation`)  |
+| Boilerplate   | Lombok                                         |
+| Build         | Maven (`./mvnw` wrapper)                        |
+| Infra (local) | Docker Compose                                 |
 
 ---
 
 ## Project Structure
 
+The codebase splits into **per-domain slices** (under `domain/`) and **shared cross-domain layers** (`entity/`, `repository/`, `common/`).
+
 ```
 src/main/java/com/mini_merchant/pay/
 │
-├── PayApplication.java          # Spring Boot entry point
+├── PayApplication.java                 # Spring Boot entry point
 │
-└── <domain>/                    # One package per business domain
-    ├── controller/              # REST endpoints (@RestController)
-    ├── service/                 # Business logic (@Service)
-    └── dto/                     # Request / response objects (Java records)
+├── common/
+│   └── dto/
+│       └── ApiResponse.java            # Uniform response envelope { status, message, data }
+│
+├── entity/                             # JPA entities (shared, not per-domain)
+│   └── Merchants.java
+│
+├── repository/                         # Persistence, one sub-package per domain
+│   └── merchants/
+│       ├── IMerchantRepository.java    # Domain-facing repository interface
+│       ├── IMerchantJpaRepository.java # Spring Data JPA interface
+│       └── MerchantRepository.java     # Impl adapting JPA → domain interface
+│
+└── domain/                             # Business slices, one package per domain
+    ├── ping/
+    │   ├── controller/  service/  dto/
+    └── merchants/
+        ├── controller/                 # MerchantController  (@RestController)
+        ├── service/                    # IMerchantService + MerchantService (@Service)
+        └── dto/
+            ├── create/                 # CreateMerchantsReqModel / CreateMerchantsResModel
+            ├── update/                 # UpdateMerchantReqModel
+            └── detail/                 # GetMerchantResModel
+
+src/main/resources/
+├── application.yaml                    # Datasource / JPA / Flyway / Redis config
+├── application.properties              # spring.application.name=pay
+└── db/migration/
+    └── V1__create_table_merchants.sql  # Flyway migrations
 ```
 
-Planned domains:
-
-```
-ping/        # Health check (already exists)
-order/       # Create and query merchant orders
-payment/     # Initiate payment session with MoMo / VNPay
-callback/    # Handle gateway webhook callbacks
-```
+> Detailed rules for adding a new domain live in [`conventions.md`](conventions.md).
 
 ---
 
@@ -57,25 +72,25 @@ callback/    # Handle gateway webhook callbacks
 
 - Java 21
 - Docker + Docker Compose
-- Maven (or use the included `./mvnw` wrapper)
+- (Maven is provided via the `./mvnw` wrapper)
 
-### 1. Start Infrastructure
+### 1. Start infrastructure
 
 ```bash
 docker compose up -d
 ```
 
-This starts:
-- **PostgreSQL 16** on `localhost:5432` (db: `mini_merchant_db`, user: `admin`, password: `abc123`)
-- **Redis 7** on `localhost:6379`
+Starts:
+- **PostgreSQL 16** — `localhost:5432` (db `mini_merchant_db`, user `admin`, password `abc123`)
+- **Redis 7** — `localhost:6379`
 
-### 2. Run the Application
+### 2. Run the application
 
 ```bash
 ./mvnw spring-boot:run
 ```
 
-The server starts on `http://localhost:8080`.
+Server starts on `http://localhost:8080`. On boot, Flyway applies any pending migrations and Hibernate **validates** (does not modify) the schema.
 
 ### 3. Verify
 
@@ -83,6 +98,38 @@ The server starts on `http://localhost:8080`.
 curl http://localhost:8080/ping
 # {"message":"pong"}
 ```
+
+---
+
+## API
+
+Base path for domain resources: `/api/v1`.
+
+### Merchants — `/api/v1/merchants`
+
+| Method | Path                    | Body                      | Returns                        |
+|--------|-------------------------|---------------------------|--------------------------------|
+| POST   | `/api/v1/merchants`     | `CreateMerchantsReqModel` | `{ id }`                       |
+| GET    | `/api/v1/merchants`     | —                         | `[ GetMerchantResModel ]`      |
+| GET    | `/api/v1/merchants/{id}`| —                         | `GetMerchantResModel`          |
+| PUT    | `/api/v1/merchants/{id}`| `UpdateMerchantReqModel`  | `GetMerchantResModel`          |
+| DELETE | `/api/v1/merchants/{id}`| —                         | `null` (soft delete)           |
+
+All responses are wrapped in the `ApiResponse<T>` envelope:
+
+```json
+{ "status": 200, "message": "success", "data": { "...": "..." } }
+```
+
+Example — create a merchant:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/merchants \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Acme","email":"acme@example.com","status":"ACTIVE","createdBy":"admin"}'
+```
+
+`apiKey` and `secret` are generated server-side and are never accepted from the client.
 
 ---
 
@@ -96,52 +143,28 @@ spring:
     url: jdbc:postgresql://localhost:5432/mini_merchant_db
     username: admin
     password: abc123
-
+    driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:
-      ddl-auto: update   # schema auto-migrated from JPA entities
-
+      ddl-auto: validate   # CHECK ONLY — never create/alter/drop tables
+  flyway:
+    enabled: true          # Flyway is the ONLY place schema is created & changed
   data:
     redis:
       host: localhost
       port: 6379
 ```
 
-For MoMo / VNPay credentials, add the gateway-specific keys here (or via environment variables) once the payment modules are implemented.
-
----
-
-## How High-Concurrency Is Handled
-
-```
-Client (many parallel requests)
-        │
-        ▼
-  Load Balancer
-        │
-   ┌────┴────┐
-   │  App 1  │  App 2  │  App N  │   ← stateless; scale horizontally
-   └────┬────┘
-        │
-        ▼
-  Redis (idempotency key + distributed lock)
-    → reject duplicate payment requests
-    → serialize concurrent callbacks for same order
-        │
-        ▼
-  PostgreSQL (single source of truth for order/transaction state)
-```
-
-Key patterns:
-- **Idempotency keys** — each payment request carries a unique key stored in Redis; retries return the cached result without hitting the gateway again
-- **Distributed locks** — Redis `SET NX PX` lock per `orderId` ensures only one callback writer at a time updates a transaction row
-- **Optimistic locking** — JPA `@Version` on transaction entities prevents lost updates if the Redis lock is bypassed
+> **Schema rule:** every schema change is a new Flyway migration under `db/migration/`. Hibernate is set to `validate`, so an entity that doesn't match the migrated schema fails startup.
 
 ---
 
 ## Build & Test
 
 ```bash
+# Compile only (fast feedback)
+./mvnw compile
+
 # Build jar (skip tests)
 ./mvnw package -DskipTests
 
@@ -149,23 +172,17 @@ Key patterns:
 ./mvnw test
 
 # Run a single test class
-./mvnw test -Dtest=PayApplicationTests
+./mvnw test -Dtest=MerchantServiceTest
 ```
+
+Service logic is unit-tested with JUnit 5 + Mockito + AssertJ (see `MerchantServiceTest`).
 
 ---
 
-## Payment Gateway Flow (planned)
+## Roadmap
 
-```
-Client → POST /api/payments          (create payment session)
-       ← {paymentUrl, orderId}
-
-Client → redirect user to paymentUrl (MoMo / VNPay hosted page)
-
-Gateway → POST /api/callbacks/momo   (gateway notifies result)
-        → POST /api/callbacks/vnpay
-
-Server → verify signature
-       → update order status in PostgreSQL
-       → notify merchant via webhook (optional)
-```
+- `order/` — create and query merchant orders
+- `payment/` — initiate payment sessions with MoMo / VNPay
+- `callback/` — verify and process gateway webhooks
+- Redis-backed idempotency keys and distributed locks for concurrent callbacks
+- Centralized exception handling (`@RestControllerAdvice`) mapping domain errors to `ApiResponse.error(...)`
