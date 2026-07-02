@@ -10,6 +10,23 @@ The authoritative pattern for adding a new entity + its database schema to Mini 
 
 ---
 
+## 0. Execution scope — STAY INSIDE THE PLAN (CRITICAL)
+
+**Read this first. It overrides any temptation to "improve" surrounding code.**
+
+When implementing an approved plan, change **only** what the plan explicitly says to change. The plan is a whitelist, not a starting point.
+
+- **Only touch files the plan names.** If a file is not listed in the plan, do not create, modify, delete, rename, or move it — full stop. If the plan literally cannot compile without touching an unlisted file, **stop and report it**; do not silently expand scope.
+- **Do not change any existing public contract** unless the plan says so, verbatim: no changing a method's name, parameters, or return type; no changing a DTO's fields; no adding/removing/renaming repository or service methods; no altering an interface.
+- **Make minimal, surgical edits.** Even when a plan shows a full file body, change only the specific lines the plan describes. Do not reformat, reorder, "clean up", re-architect, or regenerate unrelated parts of a file you are editing.
+- **Never invent new classes, DTOs, packages, or abstractions** that the plan did not ask for (e.g. do not create a parallel `XxxDetailModel` when `XxxResModel` already exists and is used).
+- **Do not weaken, rewrite, or delete existing tests** to make a build pass. Existing tests are behavior guarantees. If your change legitimately requires a test edit, the plan must call it out explicitly and it must *tighten*, not loosen, coverage. A green suite achieved by rewriting the tests to match new code is a **failure**, not a pass.
+- **A passing test run is necessary but not sufficient.** If passing required editing files outside the plan's list, the task has failed its scope contract — revert and re-plan rather than shipping the expanded diff.
+
+> Rationale: a full-file automated executor tends to regenerate whole files and their collaborators, which silently regresses unrelated behavior (e.g. dropping soft-delete filtering, changing id types). Scope discipline is what keeps an approved plan safe to ship.
+
+---
+
 ## 1. Core rules (always apply)
 
 These hold for **every** change, entity-only or full CRUD slice.
@@ -131,5 +148,6 @@ Static imports (tests) go in their own group at the top. A missing blank line be
 - [ ] `db/migration/V{n}__create_table_{entities}.sql` — matches the entity exactly.
 - [ ] Imports grouped with blank lines; lint clean.
 - [ ] `./mvnw compile` green.
+- [ ] **Scope check (§0):** only the files named in the plan changed; no unlisted file, signature, DTO, interface, or existing test was touched.
 
 > CRUD layers (repository / service / controller / DTOs / tests) are added only when a plan explicitly requests them.

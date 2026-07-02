@@ -19,11 +19,11 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import com.mini_merchant.pay.common.exception.NotFoundException;
 import com.mini_merchant.pay.domain.merchants.dto.create.CreateMerchantsReqModel;
 import com.mini_merchant.pay.domain.merchants.dto.create.CreateMerchantsResModel;
 import com.mini_merchant.pay.domain.merchants.dto.detail.GetMerchantResModel;
 import com.mini_merchant.pay.domain.merchants.dto.update.UpdateMerchantReqModel;
-import com.mini_merchant.pay.domain.merchants.service.MerchantService;
 import com.mini_merchant.pay.entity.Merchants;
 import com.mini_merchant.pay.repository.merchants.IMerchantRepository;
 
@@ -110,7 +110,7 @@ class MerchantServiceTest {
         when(iMerchantRepository.findById(id)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> merchantService.getMerchantById(id))
-                .isInstanceOf(RuntimeException.class)
+                .isInstanceOf(NotFoundException.class)
                 .hasMessageContaining(id.toString());
     }
 
@@ -146,7 +146,7 @@ class MerchantServiceTest {
         when(iMerchantRepository.findById(id)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> merchantService.updateMerchant(id, buildUpdateReq()))
-                .isInstanceOf(RuntimeException.class)
+                .isInstanceOf(NotFoundException.class)
                 .hasMessageContaining(id.toString());
     }
 
@@ -183,7 +183,7 @@ class MerchantServiceTest {
         when(iMerchantRepository.findById(id)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> merchantService.deleteMerchant(id))
-                .isInstanceOf(RuntimeException.class)
+                .isInstanceOf(NotFoundException.class)
                 .hasMessageContaining(id.toString());
     }
 

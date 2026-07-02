@@ -1,5 +1,7 @@
 package com.mini_merchant.pay.common.dto;
 
+import com.mini_merchant.pay.common.constant.HttpStatusCode;
+
 import lombok.Builder;
 import lombok.Getter;
 
@@ -12,7 +14,15 @@ public class ApiResponse<T> {
 
     public static <T> ApiResponse<T> success(T data) {
         return ApiResponse.<T>builder()
-                .status(200)
+                .status(HttpStatusCode.OK)
+                .message("success")
+                .data(data)
+                .build();
+    }
+
+    public static <T> ApiResponse<T> created(T data) {
+        return ApiResponse.<T>builder()
+                .status(HttpStatusCode.CREATED)
                 .message("success")
                 .data(data)
                 .build();

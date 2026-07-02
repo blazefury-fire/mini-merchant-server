@@ -8,6 +8,7 @@ import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.mini_merchant.pay.common.exception.NotFoundException;
 import com.mini_merchant.pay.domain.merchants.dto.create.CreateMerchantsReqModel;
 import com.mini_merchant.pay.domain.merchants.dto.create.CreateMerchantsResModel;
 import com.mini_merchant.pay.domain.merchants.dto.detail.GetMerchantResModel;
@@ -52,7 +53,7 @@ public class MerchantService implements IMerchantService {
     public GetMerchantResModel getMerchantById(UUID id) {
         Merchants merchant = iMerchantRepository.findById(id)
                 .filter(m -> !m.getIsDeleted())
-                .orElseThrow(() -> new RuntimeException("Merchant not found: " + id));
+                .orElseThrow(() -> new NotFoundException("Merchant not found: " + id));
 
         return toResModel(merchant);
     }
@@ -61,7 +62,7 @@ public class MerchantService implements IMerchantService {
     public GetMerchantResModel updateMerchant(UUID id, UpdateMerchantReqModel request) {
         Merchants merchant = iMerchantRepository.findById(id)
                 .filter(m -> !m.getIsDeleted())
-                .orElseThrow(() -> new RuntimeException("Merchant not found: " + id));
+                .orElseThrow(() -> new NotFoundException("Merchant not found: " + id));
 
         merchant.setName(request.getName());
         merchant.setEmail(request.getEmail());
@@ -78,7 +79,7 @@ public class MerchantService implements IMerchantService {
     public void deleteMerchant(UUID id) {
         Merchants merchant = iMerchantRepository.findById(id)
                 .filter(m -> !m.getIsDeleted())
-                .orElseThrow(() -> new RuntimeException("Merchant not found: " + id));
+                .orElseThrow(() -> new NotFoundException("Merchant not found: " + id));
 
         merchant.setIsDeleted(true);
         merchant.setUpdatedAt(LocalDateTime.now());
