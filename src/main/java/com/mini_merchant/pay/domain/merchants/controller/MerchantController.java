@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.mini_merchant.pay.common.constant.ApiPath;
 import com.mini_merchant.pay.common.dto.ApiResponse;
 import com.mini_merchant.pay.domain.merchants.dto.create.CreateMerchantsReqModel;
 import com.mini_merchant.pay.domain.merchants.dto.create.CreateMerchantsResModel;
@@ -25,7 +26,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
 @RestController
-@RequestMapping("/api/v1/merchants")
+@RequestMapping(ApiPath.MERCHANTS)
 @RequiredArgsConstructor
 public class MerchantController {
     private final IMerchantService iMerchantService;
