@@ -55,7 +55,7 @@ class MerchantDtoValidationTest {
     @Test
     void create_validEmail_noEmailViolation() {
         Set<ConstraintViolation<CreateMerchantsReqModel>> violations =
-                validator.validate(buildCreate("valid@example.com"));
+                validator.validate(buildCreate("valid@example.com1"));
 
         assertThat(violations)
                 .noneMatch(v -> v.getPropertyPath().toString().equals("email"));
