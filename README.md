@@ -2,7 +2,7 @@
 
 A Spring Boot payment/merchant backend (`groupId: com.mini-merchant`, `artifactId: pay`). It exposes a REST API for managing merchants and — as a roadmap — connecting them to Vietnamese payment gateways (MoMo, VNPay). PostgreSQL is the single source of truth for persistence; Redis is available for caching and, later, idempotency/locking.
 
-> **Status:** Early stage. A full merchant CRUD domain and a `/ping` health check exist today. Payment/order/callback domains are planned (see [Roadmap](#roadmap)).
+> **Status:** Early stage. A full merchant CRUD domain and a `/ping` health check exist today, plus scaffolded `transactions` and `ledger_entries` schema/entities and a centralized exception handler. Payment/order/callback domains are planned (see [Roadmap](#roadmap)).
 
 ---
 
@@ -31,12 +31,21 @@ src/main/java/com/mini_merchant/pay/
 │
 ├── PayApplication.java                 # Spring Boot entry point
 │
-├── common/
-│   └── dto/
-│       └── ApiResponse.java            # Uniform response envelope { status, message, data }
+├── common/                             # Shared, cross-domain code
+│   ├── constant/
+│   │   ├── ApiPath.java                # Centralized URL paths (/api/v1, /api/v1/merchants, /ping)
+│   │   ├── Direction.java              # Ledger-entry direction enum (DEBIT / CREDIT)
+│   │   └── HttpStatusCode.java         # int HTTP status constants (200/201/400/404/500)
+│   ├── dto/
+│   │   └── ApiResponse.java            # Uniform response envelope { status, message, data }
+│   └── exception/
+│       ├── NotFoundException.java      # Missing resource → 404
+│       └── GlobalExceptionHandler.java # @RestControllerAdvice: exceptions → ApiResponse
 │
 ├── entity/                             # JPA entities (shared, not per-domain)
-│   └── Merchants.java
+│   ├── Merchants.java
+│   ├── Transactions.java
+│   └── LedgerEntries.java
 │
 ├── repository/                         # Persistence, one sub-package per domain
 │   └── merchants/
@@ -58,8 +67,11 @@ src/main/java/com/mini_merchant/pay/
 src/main/resources/
 ├── application.yaml                    # Datasource / JPA / Flyway / Redis config
 ├── application.properties              # spring.application.name=pay
-└── db/migration/
-    └── V1__create_table_merchants.sql  # Flyway migrations
+└── db/migration/                       # Flyway migrations
+    ├── V1__create_table_merchants.sql
+    ├── V2__create_table_transactions.sql
+    ├── V3__create_table_ledger_entries.sql
+    └── V4__add_index_transactions_merchant_id.sql
 ```
 
 > Detailed rules for adding a new domain live in [`conventions.md`](conventions.md).
@@ -103,19 +115,21 @@ curl http://localhost:8080/ping
 
 ## API
 
-Base path for domain resources: `/api/v1`.
+Base path for domain resources: `/api/v1`. URL paths are centralized in `common/constant/ApiPath.java` — controllers reference the constants (e.g. `@RequestMapping(ApiPath.MERCHANTS)`) rather than hard-coding strings.
 
 ### Merchants — `/api/v1/merchants`
 
-| Method | Path                    | Body                      | Returns                        |
-|--------|-------------------------|---------------------------|--------------------------------|
-| POST   | `/api/v1/merchants`     | `CreateMerchantsReqModel` | `{ id }`                       |
-| GET    | `/api/v1/merchants`     | —                         | `[ GetMerchantResModel ]`      |
-| GET    | `/api/v1/merchants/{id}`| —                         | `GetMerchantResModel`          |
-| PUT    | `/api/v1/merchants/{id}`| `UpdateMerchantReqModel`  | `GetMerchantResModel`          |
-| DELETE | `/api/v1/merchants/{id}`| —                         | `null` (soft delete)           |
+| Method | Path                    | Body                      | Success | Returns                        |
+|--------|-------------------------|---------------------------|---------|--------------------------------|
+| POST   | `/api/v1/merchants`     | `CreateMerchantsReqModel` | 201     | `{ id }`                       |
+| GET    | `/api/v1/merchants`     | —                         | 200     | `[ GetMerchantResModel ]`      |
+| GET    | `/api/v1/merchants/{id}`| —                         | 200     | `GetMerchantResModel`          |
+| PUT    | `/api/v1/merchants/{id}`| `UpdateMerchantReqModel`  | 200     | `GetMerchantResModel`          |
+| DELETE | `/api/v1/merchants/{id}`| —                         | 200     | `null` (soft delete)           |
 
-All responses are wrapped in the `ApiResponse<T>` envelope:
+On create/update, `email` is validated as a well-formed address (`@Email`); `name`, `status`, and the audit fields are required (`@NotBlank`). `apiKey` and `secret` are generated server-side and are never accepted from the client.
+
+All responses are wrapped in the `ApiResponse<T>` envelope, whose `status` mirrors the HTTP status:
 
 ```json
 { "status": 200, "message": "success", "data": { "...": "..." } }
@@ -129,7 +143,21 @@ curl -X POST http://localhost:8080/api/v1/merchants \
   -d '{"name":"Acme","email":"acme@example.com","status":"ACTIVE","createdBy":"admin"}'
 ```
 
-`apiKey` and `secret` are generated server-side and are never accepted from the client.
+### Error handling
+
+Exceptions from **any** controller are caught by `GlobalExceptionHandler` (`@RestControllerAdvice`) and returned as an `ApiResponse` with `data: null` and a matching HTTP status:
+
+| Condition                                   | Status | Example message                             |
+|---------------------------------------------|--------|---------------------------------------------|
+| Bean-validation failure (`@Valid`)          | 400    | `email: Merchant email must be a valid…`    |
+| `NotFoundException` (e.g. unknown merchant) | 404    | `Merchant not found: <id>`                  |
+| Any other uncaught exception                | 500    | (the exception message)                     |
+
+```json
+{ "status": 404, "message": "Merchant not found: 3f2a…", "data": null }
+```
+
+Status codes come from `common/constant/HttpStatusCode.java`.
 
 ---
 
@@ -184,5 +212,5 @@ Service logic is unit-tested with JUnit 5 + Mockito + AssertJ (see `MerchantServ
 - `order/` — create and query merchant orders
 - `payment/` — initiate payment sessions with MoMo / VNPay
 - `callback/` — verify and process gateway webhooks
+- Wire the `transactions` / `ledger_entries` schema into a service/API layer
 - Redis-backed idempotency keys and distributed locks for concurrent callbacks
-- Centralized exception handling (`@RestControllerAdvice`) mapping domain errors to `ApiResponse.error(...)`
