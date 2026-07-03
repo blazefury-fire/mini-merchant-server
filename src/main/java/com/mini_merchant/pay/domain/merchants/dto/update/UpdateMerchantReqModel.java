@@ -18,6 +18,6 @@ public class UpdateMerchantReqModel {
     @NotBlank(message = "Merchant status is required")
     private String status;
 
-    @NotBlank(message = "updatedBy is required")
+    @NotBlank(message = "Merchant updatedBy is required")
     private String updatedBy;
 }
