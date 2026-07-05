@@ -11,4 +11,6 @@ public interface IUserJpaRepository extends JpaRepository<Users, UUID> {
     Optional<Users> findByEmailAndIsDeletedFalse(String email);
 
     boolean existsByEmailAndIsDeletedFalse(String email);
+
+    Optional<Users> findByIdAndIsDeletedFalse(UUID id);
 }

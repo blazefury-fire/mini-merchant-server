@@ -1,6 +1,7 @@
 package com.mini_merchant.pay.repository.users;
 
 import java.util.Optional;
+import java.util.UUID;
 
 import org.springframework.stereotype.Repository;
 
@@ -26,5 +27,10 @@ public class UserRepository implements IUserRepository {
     @Override
     public boolean existsByEmail(String email) {
         return iUserJpaRepository.existsByEmailAndIsDeletedFalse(email);
+    }
+
+    @Override
+    public Optional<Users> findById(UUID id) {
+        return iUserJpaRepository.findByIdAndIsDeletedFalse(id);
     }
 }
