@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -33,6 +34,7 @@ public class MerchantController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<CreateMerchantsResModel> create(@Valid @RequestBody CreateMerchantsReqModel request) {
         return ApiResponse.created(iMerchantService.createMerchant(request));
     }
@@ -48,12 +50,14 @@ public class MerchantController {
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<GetMerchantResModel> update(@PathVariable UUID id,
             @Valid @RequestBody UpdateMerchantReqModel request) {
         return ApiResponse.success(iMerchantService.updateMerchant(id, request));
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<Void> delete(@PathVariable UUID id) {
         iMerchantService.deleteMerchant(id);
         return ApiResponse.success(null);

@@ -15,3 +15,9 @@ spring:
     redis:
       host: localhost
       port: 6379
+
+app:
+  jwt:
+    secret: ${JWT_SECRET:change-me-please-use-a-long-random-secret-of-at-least-32-bytes}
+    access-token-ttl-minutes: 15
+    refresh-token-ttl-days: 7
