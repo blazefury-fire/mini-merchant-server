@@ -12,4 +12,6 @@ public interface IMerchantRepository {
     Optional<Merchants> findById(UUID id);
 
     List<Merchants> findAllActive();
+
+    Optional<Merchants> findByApiKey(String apiKey);
 }

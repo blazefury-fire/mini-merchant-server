@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
 
+import java.io.Serializable;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
@@ -11,7 +12,9 @@ import java.util.UUID;
 @Table(name = "merchants")
 @Getter
 @Setter
-public class Merchants {
+public class Merchants implements Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     @Id
     @Column(name = "id")
