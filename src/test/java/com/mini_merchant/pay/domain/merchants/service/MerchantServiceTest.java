@@ -85,8 +85,9 @@ class MerchantServiceTest {
         assertThat(result.getId()).isNotNull();
         assertThat(saved.getIsDeleted()).isFalse();
         assertThat(saved.getCreatedAt()).isNotNull();
-        assertThat(saved.getApiKey()).isNotBlank();
-        assertThat(saved.getSecret()).isNotBlank();
+        assertThat(saved.getApiKey()).hasSize(12);
+        assertThat(saved.getApiKey()).isEqualTo(saved.getApiKey().toUpperCase());
+        assertThat(saved.getSecret()).hasSize(44);
     }
 
     // ── getMerchantById ──────────────────────────────────────────────────────

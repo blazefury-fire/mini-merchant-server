@@ -34,6 +34,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(ApiPath.PING).permitAll()
                         .requestMatchers(ApiPath.AUTH + "/**").permitAll()
+                        .requestMatchers(ApiPath.PAYMENTS + "/**").permitAll()
                         .requestMatchers("/actuator/**").permitAll()
                         .anyRequest().authenticated())
                 .exceptionHandling(ex -> ex.authenticationEntryPoint(jwtAuthenticationEntryPoint))

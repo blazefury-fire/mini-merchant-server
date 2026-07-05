@@ -2,9 +2,11 @@ package com.mini_merchant.pay.domain.merchants.service;
 
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
+import java.util.Base64;
 import java.util.List;
 import java.util.UUID;
 
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,10 +25,6 @@ import lombok.RequiredArgsConstructor;
 public class MerchantService implements IMerchantService {
     private final IMerchantRepository iMerchantRepository;
 
-    private static final String CHARACTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ" +
-            "abcdefghijklmnopqrstuvwxyz" +
-            "0123456789" +
-            "!@#$%^&*";
     private static final SecureRandom RANDOM = new SecureRandom();
 
     @Transactional
@@ -58,6 +56,7 @@ public class MerchantService implements IMerchantService {
         return toResModel(merchant);
     }
 
+    @CacheEvict(cacheNames = "merchantByApiKey", allEntries = true)
     @Transactional
     public GetMerchantResModel updateMerchant(UUID id, UpdateMerchantReqModel request) {
         Merchants merchant = iMerchantRepository.findById(id)
@@ -75,6 +74,7 @@ public class MerchantService implements IMerchantService {
         return toResModel(merchant);
     }
 
+    @CacheEvict(cacheNames = "merchantByApiKey", allEntries = true)
     @Transactional
     public void deleteMerchant(UUID id) {
         Merchants merchant = iMerchantRepository.findById(id)
@@ -109,24 +109,14 @@ public class MerchantService implements IMerchantService {
     }
 
     private String generateApiKey() {
-        StringBuilder result = new StringBuilder("");
-
-        for (int i = 0; i < 16; i++) {
-            int index = RANDOM.nextInt(CHARACTERS.length());
-            result.append(CHARACTERS.charAt(index));
-        }
-
-        return result.toString();
+        byte[] bytes = new byte[7];
+        RANDOM.nextBytes(bytes);
+        return Base64.getEncoder().encodeToString(bytes).toUpperCase();
     }
 
     private String generateSecret() {
-        StringBuilder result = new StringBuilder("");
-
-        for (int i = 0; i < 6; i++) {
-            int index = RANDOM.nextInt(CHARACTERS.length());
-            result.append(CHARACTERS.charAt(index));
-        }
-
-        return result.toString().toUpperCase();
+        byte[] bytes = new byte[32];
+        RANDOM.nextBytes(bytes);
+        return Base64.getEncoder().encodeToString(bytes);
     }
 }
