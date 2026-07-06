@@ -10,6 +10,7 @@ import com.mini_merchant.pay.common.constant.ApiPath;
 import com.mini_merchant.pay.common.constant.HttpStatusCode;
 import com.mini_merchant.pay.common.dto.ApiResponse;
 import com.mini_merchant.pay.common.exception.UnauthorizedException;
+import com.mini_merchant.pay.common.ratelimit.IRateLimiterService;
 import com.mini_merchant.pay.domain.payment.service.IPaymentAuthService;
 import com.mini_merchant.pay.entity.Merchants;
 
@@ -32,6 +33,7 @@ public class PaymentApiKeyAuthFilter extends OncePerRequestFilter {
     private static final String TIMESTAMP_HEADER = "X-Timestamp";
 
     private final IPaymentAuthService iPaymentAuthService;
+    private final IRateLimiterService iRateLimiterService;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -50,6 +52,11 @@ public class PaymentApiKeyAuthFilter extends OncePerRequestFilter {
                     request.getMethod(),
                     request.getRequestURI());
 
+            if (!iRateLimiterService.tryAcquire(merchant.getId())) {
+                writeTooManyRequests(response, "Rate limit exceeded. Try again later.");
+                return;
+            }
+
             request.setAttribute(MERCHANT_ID_ATTRIBUTE, merchant.getId());
             filterChain.doFilter(request, response);
         } catch (UnauthorizedException ex) {
@@ -62,5 +69,12 @@ public class PaymentApiKeyAuthFilter extends OncePerRequestFilter {
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         objectMapper.writeValue(response.getOutputStream(),
                 ApiResponse.error(HttpStatusCode.UNAUTHORIZED, message));
+    }
+
+    private void writeTooManyRequests(HttpServletResponse response, String message) throws IOException {
+        response.setStatus(HttpStatusCode.TOO_MANY_REQUESTS);
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        objectMapper.writeValue(response.getOutputStream(),
+                ApiResponse.error(HttpStatusCode.TOO_MANY_REQUESTS, message));
     }
 }
