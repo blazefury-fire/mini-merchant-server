@@ -8,6 +8,6 @@ import com.mini_merchant.pay.domain.ping.dto.PingResponse;
 public class PingService {
 
     public PingResponse ping() {
-        return new PingResponse("pong1");
+        return new PingResponse("pong");
     }
 }

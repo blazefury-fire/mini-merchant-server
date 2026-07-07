@@ -4,7 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -57,8 +59,8 @@ class TransactionServiceTest {
 
     @BeforeEach
     void setUp() {
-        transactionService = new TransactionService(
-                iTransactionRepository, iLedgerEntryRepository, stringRedisTemplate, objectMapper);
+        transactionService = spy(new TransactionService(
+                iTransactionRepository, iLedgerEntryRepository, stringRedisTemplate, objectMapper));
         ReflectionTestUtils.setField(transactionService, "idempotencyTtlHours", 24L);
     }
 
@@ -70,7 +72,7 @@ class TransactionServiceTest {
     }
 
     @Test
-    void createTransaction_cacheMiss_persistsAndCachesResult() {
+    void createTransaction_cacheMiss_coreLogicSuccess_persistsSucceededTxWithLedger() {
         UUID merchantId = UUID.randomUUID();
         String idempotencyKey = "idem-123";
         String cacheKey = "idempotency:transaction:" + merchantId + ":" + idempotencyKey;
@@ -78,21 +80,24 @@ class TransactionServiceTest {
         when(valueOperations.get(anyString())).thenReturn(null);
         when(iTransactionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(iLedgerEntryRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        doReturn(3).when(transactionService).runCoreLogic();
 
         CreateTransactionResModel result =
                 transactionService.createTransaction(merchantId, idempotencyKey, buildReq());
 
         ArgumentCaptor<Transactions> txCaptor = ArgumentCaptor.forClass(Transactions.class);
-        verify(iTransactionRepository, times(1)).save(txCaptor.capture());
+        verify(iTransactionRepository, times(2)).save(txCaptor.capture());
         Transactions savedTx = txCaptor.getValue();
         assertThat(savedTx.getMerchantId()).isEqualTo(merchantId);
         assertThat(savedTx.getAmount()).isEqualByComparingTo("100.00");
         assertThat(savedTx.getCurrency()).isEqualTo("VND");
-        assertThat(savedTx.getStatus()).isEqualTo(TransactionStatus.PENDING.name());
+        assertThat(savedTx.getStatus()).isEqualTo(TransactionStatus.SUCCESS.name());
         assertThat(savedTx.getIdempotencyKey()).isEqualTo(idempotencyKey);
         assertThat(savedTx.getIsDeleted()).isFalse();
         assertThat(savedTx.getCreatedAt()).isNotNull();
         assertThat(savedTx.getCreatedBy()).isEqualTo(merchantId.toString());
+        assertThat(savedTx.getUpdatedAt()).isNotNull();
+        assertThat(savedTx.getUpdatedBy()).isEqualTo(merchantId.toString());
 
         ArgumentCaptor<LedgerEntries> entryCaptor = ArgumentCaptor.forClass(LedgerEntries.class);
         verify(iLedgerEntryRepository, times(2)).save(entryCaptor.capture());
@@ -111,7 +116,33 @@ class TransactionServiceTest {
 
         verify(valueOperations).set(eq(cacheKey), anyString(), any(Duration.class));
         assertThat(result.getId()).isEqualTo(savedTx.getId());
-        assertThat(result.getStatus()).isEqualTo(TransactionStatus.PENDING.name());
+        assertThat(result.getStatus()).isEqualTo(TransactionStatus.SUCCESS.name());
+    }
+
+    @Test
+    void createTransaction_cacheMiss_coreLogicFailure_marksFailedAndWritesNoLedger() {
+        UUID merchantId = UUID.randomUUID();
+        String idempotencyKey = "idem-456";
+        String cacheKey = "idempotency:transaction:" + merchantId + ":" + idempotencyKey;
+        when(stringRedisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.get(anyString())).thenReturn(null);
+        when(iTransactionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        doReturn(0).when(transactionService).runCoreLogic();
+
+        CreateTransactionResModel result =
+                transactionService.createTransaction(merchantId, idempotencyKey, buildReq());
+
+        ArgumentCaptor<Transactions> txCaptor = ArgumentCaptor.forClass(Transactions.class);
+        verify(iTransactionRepository, times(2)).save(txCaptor.capture());
+        Transactions savedTx = txCaptor.getValue();
+        assertThat(savedTx.getStatus()).isEqualTo(TransactionStatus.FAILED.name());
+        assertThat(savedTx.getUpdatedAt()).isNotNull();
+        assertThat(savedTx.getUpdatedBy()).isEqualTo(merchantId.toString());
+
+        verify(iLedgerEntryRepository, never()).save(any());
+        verify(valueOperations).set(eq(cacheKey), anyString(), any(Duration.class));
+        assertThat(result.getId()).isEqualTo(savedTx.getId());
+        assertThat(result.getStatus()).isEqualTo(TransactionStatus.FAILED.name());
     }
 
     @Test
@@ -122,7 +153,7 @@ class TransactionServiceTest {
         UUID priorId = UUID.randomUUID();
         CreateTransactionResModel prior = CreateTransactionResModel.builder()
                 .id(priorId)
-                .status(TransactionStatus.PENDING.name())
+                .status(TransactionStatus.SUCCESS.name())
                 .build();
         String cachedJson = objectMapper.writeValueAsString(prior);
         when(stringRedisTemplate.opsForValue()).thenReturn(valueOperations);
@@ -132,7 +163,7 @@ class TransactionServiceTest {
                 transactionService.createTransaction(merchantId, idempotencyKey, buildReq());
 
         assertThat(result.getId()).isEqualTo(priorId);
-        assertThat(result.getStatus()).isEqualTo(TransactionStatus.PENDING.name());
+        assertThat(result.getStatus()).isEqualTo(TransactionStatus.SUCCESS.name());
         verify(iTransactionRepository, never()).save(any());
         verify(iLedgerEntryRepository, never()).save(any());
     }
