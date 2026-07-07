@@ -1,26 +1,34 @@
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5432/mini_merchant_db
-    username: admin
-    password: abc123
-    driver-class-name: org.postgresql.Driver
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/mini_merchant_db}
+    username: ${DB_USERNAME:admin}
+    password: ${DB_PASSWORD:abc123}
+    driver-class-name: ${DB_DRIVER_CLASS_NAME:org.postgresql.Driver}
 
   jpa:
     hibernate:
-      ddl-auto: validate # chỉ KIỂM TRA, tuyệt đối không tạo/sửa/xoá bảng
+      ddl-auto: ${JPA_DDL_AUTO:validate} # chỉ KIỂM TRA, tuyệt đối không tạo/sửa/xoá bảng
   flyway:
-    enabled: true # Flyway là nơi DUY NHẤT tạo & đổi schema
+    enabled: ${FLYWAY_ENABLED:true} # Flyway là nơi DUY NHẤT tạo & đổi schema
 
   data:
     redis:
-      host: localhost
-      port: 6379
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
 
 app:
   jwt:
     secret: ${JWT_SECRET:change-me-please-use-a-long-random-secret-of-at-least-32-bytes}
-    access-token-ttl-minutes: 600000000
-    refresh-token-ttl-days: 7
+    access-token-ttl-minutes: ${JWT_ACCESS_TOKEN_TTL_MINUTES:600000000}
+    refresh-token-ttl-days: ${JWT_REFRESH_TOKEN_TTL_DAYS:7}
   ratelimit:
-    payments-limit: 10
-    payments-window-seconds: 60
+    payments-limit: ${RATELIMIT_PAYMENTS_LIMIT:10}
+    payments-window-seconds: ${RATELIMIT_PAYMENTS_WINDOW_SECONDS:60}
+  kafka:
+    topics:
+      payment-completed: ${KAFKA_TOPIC_PAYMENT_COMPLETED:payment-completed}
+    consumer:
+      group-id: ${KAFKA_CONSUMER_GROUP_ID:notification-service}

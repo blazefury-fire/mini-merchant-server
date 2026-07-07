@@ -29,6 +29,8 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import com.mini_merchant.pay.common.constant.Direction;
 import com.mini_merchant.pay.common.constant.TransactionStatus;
+import com.mini_merchant.pay.common.event.PaymentCompletedEvent;
+import com.mini_merchant.pay.common.kafka.IEventPublisher;
 import com.mini_merchant.pay.domain.payment.dto.transaction.CreateTransactionReqModel;
 import com.mini_merchant.pay.domain.payment.dto.transaction.CreateTransactionResModel;
 import com.mini_merchant.pay.entity.LedgerEntries;
@@ -53,6 +55,9 @@ class TransactionServiceTest {
     @Mock
     private ValueOperations<String, String> valueOperations;
 
+    @Mock
+    private IEventPublisher iEventPublisher;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private TransactionService transactionService;
@@ -60,8 +65,10 @@ class TransactionServiceTest {
     @BeforeEach
     void setUp() {
         transactionService = spy(new TransactionService(
-                iTransactionRepository, iLedgerEntryRepository, stringRedisTemplate, objectMapper));
+                iTransactionRepository, iLedgerEntryRepository, stringRedisTemplate, objectMapper,
+                iEventPublisher));
         ReflectionTestUtils.setField(transactionService, "idempotencyTtlHours", 24L);
+        ReflectionTestUtils.setField(transactionService, "paymentCompletedTopic", "payment-completed");
     }
 
     private CreateTransactionReqModel buildReq() {
@@ -114,6 +121,18 @@ class TransactionServiceTest {
         assertThat(entries).anyMatch(
                 e -> e.getDirection() == Direction.DEBIT && e.getAccount().equals("PLATFORM"));
 
+        ArgumentCaptor<PaymentCompletedEvent> eventCaptor =
+                ArgumentCaptor.forClass(PaymentCompletedEvent.class);
+        verify(iEventPublisher).publish(
+                eq("payment-completed"), eq(merchantId.toString()), eventCaptor.capture());
+        PaymentCompletedEvent event = eventCaptor.getValue();
+        assertThat(event.getTransactionId()).isEqualTo(savedTx.getId());
+        assertThat(event.getMerchantId()).isEqualTo(merchantId);
+        assertThat(event.getAmount()).isEqualByComparingTo("100.00");
+        assertThat(event.getCurrency()).isEqualTo("VND");
+        assertThat(event.getStatus()).isEqualTo(TransactionStatus.SUCCESS.name());
+        assertThat(event.getOccurredAt()).isNotNull();
+
         verify(valueOperations).set(eq(cacheKey), anyString(), any(Duration.class));
         assertThat(result.getId()).isEqualTo(savedTx.getId());
         assertThat(result.getStatus()).isEqualTo(TransactionStatus.SUCCESS.name());
@@ -140,6 +159,7 @@ class TransactionServiceTest {
         assertThat(savedTx.getUpdatedBy()).isEqualTo(merchantId.toString());
 
         verify(iLedgerEntryRepository, never()).save(any());
+        verify(iEventPublisher, never()).publish(anyString(), anyString(), any());
         verify(valueOperations).set(eq(cacheKey), anyString(), any(Duration.class));
         assertThat(result.getId()).isEqualTo(savedTx.getId());
         assertThat(result.getStatus()).isEqualTo(TransactionStatus.FAILED.name());
@@ -166,5 +186,6 @@ class TransactionServiceTest {
         assertThat(result.getStatus()).isEqualTo(TransactionStatus.SUCCESS.name());
         verify(iTransactionRepository, never()).save(any());
         verify(iLedgerEntryRepository, never()).save(any());
+        verify(iEventPublisher, never()).publish(anyString(), anyString(), any());
     }
 }

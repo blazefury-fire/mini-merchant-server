@@ -17,6 +17,8 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import com.mini_merchant.pay.common.constant.Direction;
 import com.mini_merchant.pay.common.constant.TransactionStatus;
+import com.mini_merchant.pay.common.event.PaymentCompletedEvent;
+import com.mini_merchant.pay.common.kafka.IEventPublisher;
 import com.mini_merchant.pay.domain.payment.dto.transaction.CreateTransactionReqModel;
 import com.mini_merchant.pay.domain.payment.dto.transaction.CreateTransactionResModel;
 import com.mini_merchant.pay.entity.LedgerEntries;
@@ -46,9 +48,13 @@ public class TransactionService implements ITransactionService {
     private final ILedgerEntryRepository iLedgerEntryRepository;
     private final StringRedisTemplate stringRedisTemplate;
     private final ObjectMapper objectMapper;
+    private final IEventPublisher iEventPublisher;
 
     @Value("${app.idempotency.ttl-hours:24}")
     private long idempotencyTtlHours;
+
+    @Value("${app.kafka.topics.payment-completed:payment-completed}")
+    private String paymentCompletedTopic;
 
     @Override
     @Transactional
@@ -132,6 +138,39 @@ public class TransactionService implements ITransactionService {
                 MERCHANT_ACCOUNT_PREFIX + merchantId, Direction.CREDIT, request.getAmount(), now, actor));
         iLedgerEntryRepository.save(buildLedgerEntry(transaction.getId(),
                 PLATFORM_ACCOUNT, Direction.DEBIT, request.getAmount(), now, actor));
+
+        schedulePaymentCompletedEvent(
+                buildPaymentCompletedEvent(transaction, merchantId, request, now));
+    }
+
+    private PaymentCompletedEvent buildPaymentCompletedEvent(Transactions transaction, UUID merchantId,
+            CreateTransactionReqModel request, LocalDateTime occurredAt) {
+        return PaymentCompletedEvent.builder()
+                .transactionId(transaction.getId())
+                .merchantId(merchantId)
+                .amount(request.getAmount())
+                .currency(request.getCurrency())
+                .status(transaction.getStatus())
+                .occurredAt(occurredAt)
+                .build();
+    }
+
+    private void schedulePaymentCompletedEvent(PaymentCompletedEvent event) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    publishPaymentCompleted(event);
+                }
+            });
+        } else {
+            publishPaymentCompleted(event);
+        }
+    }
+
+    private void publishPaymentCompleted(PaymentCompletedEvent event) {
+        // Partition by merchantId so a merchant's events stay ordered on one partition.
+        iEventPublisher.publish(paymentCompletedTopic, event.getMerchantId().toString(), event);
     }
 
     private void applyStatusTransition(Transactions transaction, TransactionStatus target, String actor) {
