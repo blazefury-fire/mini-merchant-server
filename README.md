@@ -16,10 +16,110 @@ A Spring Boot payment/merchant backend (`groupId: com.mini-merchant`, `artifactI
 | Persistence   | PostgreSQL 16 + Spring Data JPA / Hibernate    |
 | Migrations    | Flyway (SQL, the **only** thing that alters schema) |
 | Cache         | Redis 7 + Spring Data Redis (`@Cacheable` + `StringRedisTemplate`) |
+| Messaging     | Apache Kafka 3.8 + Spring Kafka (`payment-completed` events)   |
 | Validation    | Spring Bean Validation (`jakarta.validation`)  |
 | Boilerplate   | Lombok                                         |
 | Build         | Maven (`./mvnw` wrapper)                        |
 | Infra (local) | Docker Compose                                 |
+
+---
+
+## Architecture
+
+The server is a single Spring Boot app with two independent entry paths. **JWT** requests (`auth`, `merchants`) pass through `JwtAuthenticationFilter`; **payment** requests (`/api/v1/payments/**`) pass through `PaymentApiKeyAuthFilter` (API-key + HMAC), which also applies per-merchant rate limiting. Both paths run `controller → service → repository` over **PostgreSQL** (the source of truth), with **Redis** backing the merchant-lookup cache, the rate-limit counter, and transaction idempotency. A successful transaction fans out asynchronously: after the DB commit it publishes a `payment-completed` event to **Kafka**, which a consumer turns into a notification.
+
+The diagram source lives in [`docs/architecture.puml`](docs/architecture.puml) (render it with any PlantUML viewer — the VS Code PlantUML extension, IntelliJ, or [plantuml.com](https://www.plantuml.com/plantuml/uml)).
+
+<!--
+  To show this diagram inline on GitHub, uncomment the line below and replace
+  OWNER/REPO/BRANCH with this repo's slug (GitHub does not render ```plantuml blocks):
+  ![Architecture](https://www.plantuml.com/plantuml/proxy?fmt=svg&src=https://raw.githubusercontent.com/OWNER/REPO/BRANCH/docs/architecture.puml)
+-->
+
+```plantuml
+@startuml
+title Mini Merchant Server — Runtime Component & Flow
+
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam defaultTextAlignment center
+
+actor "User / Admin\n(JWT client)" as user
+actor "Merchant\n(server-to-server)" as merchant
+
+package "Spring Boot app (:8080)" {
+
+  package "Security filters" {
+    [JwtAuthenticationFilter] as jwtF
+    [PaymentApiKeyAuthFilter\n(API-key + HMAC)] as payF
+  }
+
+  package "Controllers" {
+    [AuthController] as authC
+    [MerchantController] as merchC
+    [PingController] as pingC
+    [PaymentController] as payC
+  }
+
+  package "Services" {
+    [AuthService] as authS
+    [MerchantService] as merchS
+    [PingService] as pingS
+    [PaymentAuthService] as payAuthS
+    [TransactionService] as txS
+    [NotificationService] as notifS
+  }
+
+  package "Messaging" {
+    [KafkaEventPublisher\n(IEventPublisher)] as pub
+    [KafkaEventSubscriber\n(@KafkaListener)] as sub
+  }
+
+  [RateLimiterService] as rl
+  [Repositories\n(I*Repository)] as repo
+}
+
+database "PostgreSQL 16\n(source of truth)" as pg
+database "Redis 7\n(cache | rate limit | idempotency)" as redis
+queue "Kafka\ntopic: payment-completed" as kafka
+
+' --- JWT flow (auth / merchants) ---
+user --> jwtF : Bearer JWT
+jwtF --> authC
+jwtF --> merchC
+pingC --> pingS
+authC --> authS
+merchC --> merchS
+
+' --- Payment flow (API-key + HMAC) ---
+merchant --> payF : X-Api-Key / X-Signature / X-Timestamp
+payF --> rl : check window
+rl --> redis : INCR + EXPIRE (fail-open)
+payF --> payC
+payC --> payAuthS
+payC --> txS
+
+' --- Persistence ---
+authS --> repo
+merchS --> repo
+txS --> repo
+repo --> pg
+
+' --- Redis (dotted = cache side-effects) ---
+payAuthS ..> redis : findByApiKey (cached)
+merchS ..> redis : evict merchantByApiKey
+txS ..> redis : idempotency result (after commit)
+
+' --- Event pipeline (after commit, on SUCCESS) ---
+txS --> pub : PaymentCompletedEvent
+pub --> kafka : key = merchantId
+kafka --> sub
+sub --> notifS
+
+@enduml
+```
+
+**Payment event pipeline.** On a **SUCCESS** `POST /transaction`, after the DB transaction commits, `TransactionService` publishes a `PaymentCompletedEvent` (keyed by `merchantId`, so a merchant's events stay ordered on one partition) to the `payment-completed` topic via `IEventPublisher`/`KafkaEventPublisher`. `KafkaEventSubscriber` (consumer group `notification-service`) consumes it and calls `NotificationService` — currently a log-only simulated notification. Publishing happens **after commit**, so a rolled-back transaction never emits an event.
 
 ---
 
@@ -35,7 +135,9 @@ src/main/java/com/mini_merchant/pay/
 ├── common/                             # Shared, cross-domain code
 │   ├── config/
 │   │   ├── SecurityConfig.java         # SecurityFilterChain, method security, BCrypt encoder
-│   │   └── CacheConfig.java            # @EnableCaching + Redis CacheManager (JSON values, TTL)
+│   │   ├── CacheConfig.java            # @EnableCaching + Redis CacheManager (JSON values, TTL)
+│   │   ├── KafkaProducerConfig.java    # KafkaTemplate / producer factory
+│   │   └── KafkaConsumerConfig.java    # consumer factory + JSON-deserializing listener container
 │   ├── constant/
 │   │   ├── ApiPath.java                # Centralized URL paths (/api/v1, merchants, auth, payments, /ping)
 │   │   ├── Role.java                   # ADMIN / MERCHANT / USER
@@ -44,6 +146,12 @@ src/main/java/com/mini_merchant/pay/
 │   │   └── HttpStatusCode.java         # int HTTP status constants (incl. 429)
 │   ├── dto/
 │   │   └── ApiResponse.java            # Uniform response envelope { status, message, data }
+│   ├── event/
+│   │   └── PaymentCompletedEvent.java  # domain event emitted on a successful transaction
+│   ├── kafka/
+│   │   ├── IEventPublisher.java        # publish(topic, key, payload) contract
+│   │   ├── KafkaEventPublisher.java    # KafkaTemplate-based publisher (keyed by merchantId)
+│   │   └── KafkaEventSubscriber.java   # @KafkaListener → NotificationService
 │   ├── ratelimit/
 │   │   ├── IRateLimiterService.java    # Per-merchant payment rate-limit contract
 │   │   └── RateLimiterService.java     # Redis fixed-window counter (INCR + EXPIRE), fail-open
@@ -69,8 +177,9 @@ src/main/java/com/mini_merchant/pay/
     ├── ping/       # health check
     ├── auth/       # register / login / refresh / logout
     ├── merchants/  # merchant CRUD (writes are ADMIN-gated)
-    └── payment/    # API-key/HMAC-signed payment calls: /ping + POST /transaction
-        # each: controller/  service/  dto/
+    ├── payment/    # API-key/HMAC-signed payment calls: /ping + POST /transaction
+    │               # each: controller/  service/  dto/
+    └── notification/ # Kafka consumer slice → NotificationService (log-only, service/ only)
 
 src/main/resources/
 ├── application.yaml                    # Datasource / JPA / Flyway / Redis / JWT / cache config
@@ -106,6 +215,11 @@ Starts:
 - **PostgreSQL 16** — `localhost:5432` (db `mini_merchant_db`, user `admin`, password `abc123`)
 - **Redis 7** — `localhost:6379`
 - **Adminer** (DB UI) — `localhost:8081`
+- **Kafka 3.8** — `localhost:9092`
+- **Kafka UI** — `localhost:8082`
+- **app** — the server itself (`localhost:8080`), built from the `Dockerfile` and wired to the services above
+
+> `docker compose up -d` now brings up the **entire stack including the app** (via the `app` service + `Dockerfile`), so a fresh clone is a single command. To iterate on the app locally against just the infra, skip the `app` container and run it with the Maven wrapper instead:
 
 ### 2. Run the application
 
@@ -315,6 +429,8 @@ Service/logic is unit-tested with JUnit 5 + Mockito + AssertJ. Notable infra-fre
 - ✅ `payment/` `POST /transaction` — writes a transaction + balanced double-entry `ledger_entries` in one DB transaction
 - ✅ Per-merchant payment rate limiting (Redis fixed window → 429)
 - ✅ Redis-backed transaction idempotency keys
+- ✅ Kafka event pipeline — `payment-completed` published after commit (keyed by `merchantId`)
+- ✅ `notification/` consumer — `@KafkaListener` → `NotificationService` (log-only)
 - `order/` — create and query merchant orders
 - `payment/` — real payment operations + MoMo / VNPay gateway integration, body-bound signatures
 - `callback/` — verify and process gateway webhooks

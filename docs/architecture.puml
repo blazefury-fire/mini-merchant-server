@@ -1,0 +1,80 @@
+@startuml
+title Mini Merchant Server — Runtime Component & Flow
+
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam defaultTextAlignment center
+
+actor "User / Admin\n(JWT client)" as user
+actor "Merchant\n(server-to-server)" as merchant
+
+package "Spring Boot app (:8080)" {
+
+  package "Security filters" {
+    [JwtAuthenticationFilter] as jwtF
+    [PaymentApiKeyAuthFilter\n(API-key + HMAC)] as payF
+  }
+
+  package "Controllers" {
+    [AuthController] as authC
+    [MerchantController] as merchC
+    [PingController] as pingC
+    [PaymentController] as payC
+  }
+
+  package "Services" {
+    [AuthService] as authS
+    [MerchantService] as merchS
+    [PingService] as pingS
+    [PaymentAuthService] as payAuthS
+    [TransactionService] as txS
+    [NotificationService] as notifS
+  }
+
+  package "Messaging" {
+    [KafkaEventPublisher\n(IEventPublisher)] as pub
+    [KafkaEventSubscriber\n(@KafkaListener)] as sub
+  }
+
+  [RateLimiterService] as rl
+  [Repositories\n(I*Repository)] as repo
+}
+
+database "PostgreSQL 16\n(source of truth)" as pg
+database "Redis 7\n(cache | rate limit | idempotency)" as redis
+queue "Kafka\ntopic: payment-completed" as kafka
+
+' --- JWT flow (auth / merchants) ---
+user --> jwtF : Bearer JWT
+jwtF --> authC
+jwtF --> merchC
+pingC --> pingS
+authC --> authS
+merchC --> merchS
+
+' --- Payment flow (API-key + HMAC) ---
+merchant --> payF : X-Api-Key / X-Signature / X-Timestamp
+payF --> rl : check window
+rl --> redis : INCR + EXPIRE (fail-open)
+payF --> payC
+payC --> payAuthS
+payC --> txS
+
+' --- Persistence ---
+authS --> repo
+merchS --> repo
+txS --> repo
+repo --> pg
+
+' --- Redis (dotted = cache side-effects) ---
+payAuthS ..> redis : findByApiKey (cached)
+merchS ..> redis : evict merchantByApiKey
+txS ..> redis : idempotency result (after commit)
+
+' --- Event pipeline (after commit, on SUCCESS) ---
+txS --> pub : PaymentCompletedEvent
+pub --> kafka : key = merchantId
+kafka --> sub
+sub --> notifS
+
+@enduml

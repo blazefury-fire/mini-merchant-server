@@ -1,0 +1,36 @@
+# Build output — the image rebuilds this itself in the build stage
+target/
+
+# Version control & CI
+.git/
+.gitignore
+.gitattributes
+.github/
+
+# Maven wrapper jar (build stage uses the official Maven image instead)
+.mvn/wrapper/maven-wrapper.jar
+
+# IDE / editor
+.idea/
+.vscode/
+*.iml
+*.iws
+*.ipr
+
+# Local secrets & environment (never bake into an image)
+.env
+
+# Docs, tooling, and project scratch not needed at build time
+HELP.md
+README.md
+CLAUDE.md
+conventions.md
+document-plan/
+hooks/
+k6/
+.claude/
+
+# Existing container/orchestration files
+Dockerfile
+.dockerignore
+docker-compose.yml
